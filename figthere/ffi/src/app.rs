@@ -13,6 +13,8 @@ pub(crate) struct Inner {
 
 /// A session with one new, empty document.
 pub(crate) fn new() -> Inner {
+    // Text has no glyphs until the installed fonts are known: they are scanned the first time text needs them, as the CLI does.
+    figcraft_text::scan_system_fonts_on_demand();
     Inner { h: Headless::new() }
 }
 

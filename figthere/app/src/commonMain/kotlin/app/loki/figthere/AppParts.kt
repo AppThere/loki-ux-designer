@@ -34,6 +34,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.input.key.utf16CodePoint
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.unit.dp
 import app.loki.kit.CanvasInput
 import app.loki.kit.CanvasPhase
@@ -275,8 +282,14 @@ private fun PagesPanel(state: JsonElement?, run: (String, JsonObject) -> Unit, m
 class CanvasTools {
     var live by androidx.compose.runtime.mutableIntStateOf(0)
         private set
-    var editing by androidx.compose.runtime.mutableStateOf<app.loki.kit.CanvasTextEdit?>(null)
-    val animating = false
+    /** Where the caret and the highlight are while a text layer is edited (the engine edits it, `text.edit.*`); null when none is. */
+    var text by androidx.compose.runtime.mutableStateOf<TextGeometry?>(null)
+        private set
+    /** The caret blinks, so the canvas draws each frame while text is edited. */
+    val animating get() = text != null
+    private val clicks = ClickRun()
+    private val clock = kotlin.time.TimeSource.Monotonic.markNow()
+    private var swallowUp = false
     private var overlay by androidx.compose.runtime.mutableStateOf<JsonElement?>(null)
     private val pending = ArrayDeque<JsonObject>()
     private var inFlight = false
@@ -295,6 +308,7 @@ class CanvasTools {
 
     private fun readOverlay(ws: WorkspaceContext) {
         ws.call("ui.inspect", JsonObject(emptyMap())) { overlay = it.obj()?.get("tool").obj()?.get("overlay") }
+        ws.call("engine.execute", buildJsonObject { put("command", "text.edit.selection"); put("params", JsonObject(emptyMap())) }) { text = parseTextEdit(it) }
     }
 
     private fun event(kind: String, p: app.loki.kit.CanvasPoint, i: CanvasInput) = buildJsonObject {
@@ -307,13 +321,21 @@ class CanvasTools {
         val p = i.points.lastOrNull() ?: return
         when (i.phase) {
             CanvasPhase.Hover -> if (pending.isEmpty() && !inFlight) { pending += event("hover", p, i); flush(ws) }
-            CanvasPhase.Down -> { pending += event("down", p, i); flush(ws) }
+            CanvasPhase.Down -> {
+                // A second press close in time and place is a double click (it enters a text layer's text); the lift after it is not sent.
+                val run = clicks.press(clock.elapsedNow().inWholeMilliseconds, androidx.compose.ui.geometry.Offset(p.x.toFloat(), p.y.toFloat()))
+                if (run >= 2) { pending += event(if (run == 2) "doubleclick" else "tripleclick", p, i); swallowUp = true } else pending += event("down", p, i)
+                flush(ws)
+            }
             CanvasPhase.Drag -> {
                 // Moves wait for the one in flight: only the newest is kept.
                 if (pending.lastOrNull().str("kind") == "move") pending.removeLast()
                 pending += event("move", p, i); flush(ws)
             }
-            CanvasPhase.Up, CanvasPhase.Cancel -> { pending += event("up", p, i); ending = true; flush(ws) }
+            CanvasPhase.Up, CanvasPhase.Cancel -> {
+                if (swallowUp) swallowUp = false else pending += event("up", p, i)
+                ending = true; flush(ws)
+            }
         }
     }
 
@@ -332,6 +354,17 @@ class CanvasTools {
     /** The tool's feedback over the picture: a rubber band for a marquee, the shape being drawn. */
     fun DrawScope.draw(view: CanvasView, ws: WorkspaceContext?, phase: Float) {
         val accent = Color(0xFF4C9AFF)
+        // The text being edited: the highlight of a range, and the caret (blinking, steady while a key is pressed).
+        text?.let { t ->
+            for (r in t.rects) {
+                val q = r.map { view.toScreen(it.x.toDouble(), it.y.toDouble()) }
+                val path = androidx.compose.ui.graphics.Path().apply { moveTo(q[0].x, q[0].y); for (k in 1..3) lineTo(q[k].x, q[k].y); close() }
+                drawPath(path, accent.copy(alpha = 0.3f))
+            }
+            if ((phase / 9f).toInt() % 2 == 0) t.caret?.let { c ->
+                drawLine(Color(0xFF111111), view.toScreen(c[0].x.toDouble(), c[0].y.toDouble()), view.toScreen(c[1].x.toDouble(), c[1].y.toDouble()), strokeWidth = 2f)
+            }
+        }
         val o = overlay.obj() ?: return
         fun pt(e: JsonElement?): Offset? {
             val a = e as? JsonArray ?: return null
@@ -350,5 +383,27 @@ class CanvasTools {
         for (e in o["pen"].arr()) pt(e)?.let { drawCircle(accent, 4f, it) }
     }
 
-    fun commitText(ws: WorkspaceContext, edit: app.loki.kit.CanvasTextEdit, text: String) { editing = null }
+/** A key while text is edited goes to the engine's editor: an editing key as `text.edit.key`, a character as `text.edit.insert`; a shortcut is left to the window. */
+    fun onKey(e: androidx.compose.ui.input.key.KeyEvent, ws: WorkspaceContext): Boolean {
+        if (text == null || e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return false
+        val cmd = e.isCtrlPressed || e.isMetaPressed
+        val name = editKeyName(e.key)
+        when {
+            cmd && e.key == androidx.compose.ui.input.key.Key.A -> ws.run("text.edit.key", buildJsonObject { put("key", "SelectAll") }) {}
+            cmd -> return false
+            name != null -> ws.run("text.edit.key", buildJsonObject { put("key", name); put("shift", e.isShiftPressed); put("alt", e.isAltPressed) }) {}
+            e.utf16CodePoint in 32..0xFFFF && e.utf16CodePoint != 127 && !e.isAltPressed -> ws.run("text.edit.insert", buildJsonObject { put("text", e.utf16CodePoint.toChar().toString()) }) {}
+            else -> return false
+        }
+        return true
+    }
+
+    /** What the soft keyboard did, as the engine's editor hears it (a composition is a preedit until it is final). */
+    fun onIme(a: app.loki.kit.ImeAction, ws: WorkspaceContext) {
+        when (a) {
+            is app.loki.kit.ImeAction.Backspace -> repeat(a.count) { ws.run("text.edit.key", buildJsonObject { put("key", "Backspace") }) {} }
+            is app.loki.kit.ImeAction.Commit -> ws.run("text.edit.insert", buildJsonObject { put("text", a.text) }) {}
+            is app.loki.kit.ImeAction.Preedit -> ws.run("text.edit.preedit", buildJsonObject { put("text", a.text); a.cursor?.let { put("cursor", it) } }) {}
+        }
+    }
 }
