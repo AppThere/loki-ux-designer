@@ -54,7 +54,7 @@ fun SampledColorDialog(onRun: (command: String, params: JsonObject) -> Unit, onD
                 val params = buildJsonObject {
                 if (f0.isNotBlank()) put("name", f0)
                 }
-                /* TODO: which command this dialog runs was not found */
+                onRun("selection.createColorStyle", params)
                 onDismiss()
             }) { Text("OK") }
         },

@@ -52,9 +52,9 @@ fun CreditsContributorsInDialog(onRun: (command: String, params: JsonObject) -> 
             TextButton(onClick = onDismiss) { Text("Cancel") }
             TextButton(onClick = {
                 val params = buildJsonObject {
-                if (f0.isNotBlank()) put("field0", f0)
+                if (f0.isNotBlank()) put("field", f0)
                 }
-                /* TODO: which command this dialog runs was not found */
+                onRun("style.bind", params)
                 onDismiss()
             }) { Text("OK") }
         },
