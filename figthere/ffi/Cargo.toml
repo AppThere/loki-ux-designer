@@ -1,0 +1,25 @@
+[package]
+name = "loki-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C ABI over the FigCraft engine for the FigThere Kotlin Multiplatform front end"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+figcraft-mcp = { path = "../../crates/mcp" }
+figcraft-engine = { path = "../../crates/engine" }
+figcraft-doc = { path = "../../crates/doc" }
+figcraft-geom = { path = "../../crates/geom" }
+figcraft-render = { path = "../../crates/render" }
+serde_json = "1"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unimplemented = "deny"
+todo = "deny"
+unreachable = "deny"
