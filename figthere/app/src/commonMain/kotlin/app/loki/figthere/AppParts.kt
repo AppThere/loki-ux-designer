@@ -123,7 +123,7 @@ fun OptionsBar(tool: String, tools: List<RailTool>, state: JsonElement?, run: (S
             Text(tools.firstOrNull { it.id.equals(tool, true) }?.label ?: tool, style = MaterialTheme.typography.labelLarge)
         } else {
             val id = node.long("id") ?: return@Row
-            fun set(k: String, v: Double) = run("engine.execute", buildJsonObject { put("command", "node.set"); put("params", buildJsonObject { put("ids", buildJsonArray { add(JsonPrimitive(id)) }); put(k, v) }) })
+            fun set(k: String, v: Double) = run("node.set", buildJsonObject { put("ids", buildJsonArray { add(JsonPrimitive(id)) }); put(k, v) })
             NumberChip("X", node.num("x"), -100000.0, 100000.0, { set("x", it) }, decimals = 1)
             NumberChip("Y", node.num("y"), -100000.0, 100000.0, { set("y", it) }, decimals = 1)
             NumberChip("W", node.num("width"), 0.0, 100000.0, { set("width", it) }, decimals = 1)
@@ -149,7 +149,7 @@ private fun FillWell(node: JsonElement, run: (String, JsonObject) -> Unit) {
             if (c != null) put("color", hexOf(c)) else put("index", 0)
             if (c != null && fill != null) put("index", 0)
         }
-        run("engine.execute", buildJsonObject { put("command", cmd); put("params", params) })
+        run(cmd, params)
     }, onDismiss = { open = false }, allowNone = true)
 }
 
@@ -210,7 +210,7 @@ fun dockPanels(state: JsonElement?, revision: Int, run: (String, JsonObject) -> 
 )
 
 private fun exec(run: (String, JsonObject) -> Unit, command: String, params: JsonObject) =
-    run("engine.execute", buildJsonObject { put("command", command); put("params", params) })
+    run(command, params)
 
 private fun idList(vararg ids: Long) = buildJsonArray { ids.forEach { add(JsonPrimitive(it)) } }
 
