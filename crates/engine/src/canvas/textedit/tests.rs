@@ -569,3 +569,56 @@ fn an_empty_ime_commit_ends_the_composition_without_inserting_text() {
     end(&mut s).unwrap();
     assert_eq!(insert_ime_commit(&mut s, "").unwrap(), ImeInsertion::Nothing);
 }
+
+fn geometry(s: &mut Session) -> serde_json::Value {
+    s.execute("text.edit.selection", &json!({})).unwrap()
+}
+
+fn n(v: &serde_json::Value) -> f64 {
+    v.as_f64().unwrap()
+}
+
+// These check the shape and where it is, not glyph widths: a build without the fonts lays text out
+// with zero-width glyphs, so a caret's distance along the line is not asserted here.
+
+#[test]
+fn the_caret_is_an_upright_segment_with_height_and_a_range_is_highlighted() {
+    let (mut s, id) = setup("Hello");
+    begin(&mut s, id, Some(5), false).unwrap();
+    let g = geometry(&mut s);
+    let (top, bottom) = (n(&g["caretLine"][0][1]), n(&g["caretLine"][1][1]));
+    assert!(bottom > top, "a caret has height, from {top} to {bottom}");
+    assert_eq!(n(&g["caretLine"][0][0]), n(&g["caretLine"][1][0]), "an upright layer has an upright caret");
+    assert!(g["rects"].as_array().unwrap().is_empty(), "no highlight for a caret");
+    key(&mut s, "SelectAll", false, false, false).unwrap();
+    let g = geometry(&mut s);
+    let rects = g["rects"].as_array().unwrap();
+    assert!(!rects.is_empty(), "a selected range is highlighted: {g}");
+    for r in rects {
+        assert_eq!(r.as_array().unwrap().len(), 4, "a quadrilateral");
+        assert!(n(&r[2][1]) > n(&r[0][1]), "it has height");
+    }
+}
+
+#[test]
+fn geometry_follows_the_layer_in_page_points() {
+    let (mut s, id) = setup("Hello");
+    begin(&mut s, id, Some(0), false).unwrap();
+    let at_origin = geometry(&mut s);
+    end(&mut s).unwrap();
+    s.execute("node.set", &json!({"ids": [id.0], "x": 300, "y": 200})).unwrap();
+    begin(&mut s, id, Some(0), false).unwrap();
+    let moved = geometry(&mut s);
+    assert!((n(&moved["caretLine"][0][0]) - n(&at_origin["caretLine"][0][0]) - 300.0).abs() < 0.01, "{at_origin} then {moved}");
+    assert!((n(&moved["caretLine"][0][1]) - n(&at_origin["caretLine"][0][1]) - 200.0).abs() < 0.01);
+}
+
+#[test]
+fn geometry_is_null_when_no_text_is_being_edited_and_empty_text_has_a_caret() {
+    let (mut s, id) = setup("");
+    assert!(geometry(&mut s).is_null());
+    begin(&mut s, id, None, false).unwrap();
+    let g = geometry(&mut s);
+    assert!(g["caretLine"].is_array(), "an empty layer still shows a caret: {g}");
+    assert!(n(&g["caretLine"][1][1]) > n(&g["caretLine"][0][1]));
+}

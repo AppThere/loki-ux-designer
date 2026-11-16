@@ -15,6 +15,36 @@ fn finite(v: f64) -> f64 {
     if v.is_finite() { v } else { 0.0 }
 }
 
+/// Where the caret and the highlight of `anchor..caret` are on text layer `id`, in page points, from the
+/// layout the layer is drawn with (the desktop's `TextOnScreen`, without the screen): the caret as
+/// `[[x, top], [x, bottom]]` (an empty layer: a line of default height at its origin) and a quadrilateral
+/// per selected line. `(Null, [])` when `id` is not text.
+fn edit_geometry(doc: &figcraft_doc::Document, id: NodeId, caret: usize, anchor: usize) -> (Value, Vec<Value>) {
+    let Some(node) = doc.node(id) else { return (Value::Null, Vec::new()) };
+    let Some((layout, dy)) = figcraft_text::layout_node(node) else { return (Value::Null, Vec::new()) };
+    let world = doc.world_transform(id);
+    let at = |x: f64, y: f64| {
+        let q = layout.warp_point(x, y);
+        let p = world * figcraft_geom::Point::new(q.x, q.y + dy);
+        json!([p.x, p.y])
+    };
+    let (x, li) = layout.caret(caret);
+    let caret_line = match layout.lines.get(li).or(layout.lines.last()) {
+        Some(line) => json!([at(x, line.top), at(x, line.top + line.height)]),
+        None => json!([at(0.0, 0.0), at(0.0, 14.0)]),
+    };
+    let rects = if anchor == caret {
+        Vec::new()
+    } else {
+        layout
+            .selection_rects(anchor.min(caret), anchor.max(caret))
+            .iter()
+            .map(|r| json!([at(r.x0, r.y0), at(r.x1, r.y0), at(r.x1, r.y1), at(r.x0, r.y1)]))
+            .collect()
+    };
+    (caret_line, rects)
+}
+
 /// Apply a style change to the edited range, or to whole text layers in the selection.
 fn style(s: &mut Session, p: &Value, f: impl Fn(&mut TextStyle)) -> Result<Value> {
     if let Some((id, a, b)) = textedit::selected_range(s) {
@@ -682,15 +712,25 @@ pub fn specs() -> Vec<CommandSpec> {
                 ok()
             }
         ),
-        spec!("text.edit.selection", "Text selection", "{}", false, |s, _| {
-            Ok(match s.ds()?.text_edit.clone() {
-                Some(te) => json!({
-                    "id": te.id, "caret": te.caret, "anchor": te.anchor, "text": textedit::selected_text(s),
-                    "preedit": te.preedit.map(|p| json!({"text": p.text, "cursor": p.cursor})),
-                }),
-                None => Value::Null,
-            })
-        }),
+        spec!(
+            "text.edit.selection",
+            "Text selection",
+            "{} → {id, caret, anchor, text, preedit, caretLine: [[x, top], [x, bottom]] | null, rects: [[[x, y] × 4]]} caretLine and rects say where the caret and the highlight of the selected characters are, in page points (turned with the layer; one quadrilateral per selected line)",
+            false,
+            |s, _| {
+                Ok(match s.ds()?.text_edit.clone() {
+                    Some(te) => {
+                        let (caret_line, rects) = edit_geometry(s.doc()?, te.id, te.caret, te.anchor);
+                        json!({
+                            "id": te.id, "caret": te.caret, "anchor": te.anchor, "text": textedit::selected_text(s),
+                            "preedit": te.preedit.map(|p| json!({"text": p.text, "cursor": p.cursor})),
+                            "caretLine": caret_line, "rects": rects,
+                        })
+                    }
+                    None => Value::Null,
+                })
+            }
+        ),
         spec!("text.edit.end", "Stop editing text", "{}", false, |s, _| {
             textedit::end(s)?;
             ok()
