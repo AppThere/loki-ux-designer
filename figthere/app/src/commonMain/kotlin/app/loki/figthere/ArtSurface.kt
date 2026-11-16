@@ -4,7 +4,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.focusable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameMillis
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -13,7 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.ImageBitmap
 import app.loki.kit.ArtCanvas
-import app.loki.kit.CanvasTextEditor
+import app.loki.kit.ImeBridge
+import app.loki.kit.isTouchPlatform
 import app.loki.kit.CanvasView
 import app.loki.kit.EngineClient
 import app.loki.kit.LocalWorkspace
@@ -59,15 +66,23 @@ fun ArtSurface(native: SurfaceEngine, revision: Int, modifier: Modifier) {
         }
     }
     LaunchedEffect(ws?.state, ws?.tool, tools.live) { ws?.let { tools.onRevision(it, view) } }
-    Box(modifier) {
+    // The caret blinks only while there is a caret: a still canvas draws nothing per frame.
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(tools.animating) {
+        if (tools.animating) { val start = withFrameMillis { it }; while (true) withFrameMillis { phase = ((it - start) / 60f) % 1000f } }
+    }
+    val imeFocus = remember { FocusRequester() }
+    val keyFocus = remember { FocusRequester() }
+    // While text is edited the keys come to the canvas (a touch screen's soft keyboard to the hidden field in it).
+    LaunchedEffect(tools.text != null) { if (tools.text != null) runCatching { (if (isTouchPlatform) imeFocus else keyFocus).requestFocus() } }
+    Box(modifier.focusRequester(keyFocus).focusable().onPreviewKeyEvent { e -> ws?.let { tools.onKey(e, it) } ?: false }) {
         ArtCanvas(
             page, image, view,
             onInput = { input -> ws?.let { tools.onInput(input, it, view) } },
             modifier = Modifier.fillMaxSize(),
             panTool = tools.pans(ws?.tool.orEmpty()),
-            overlay = { v -> with(tools) { draw(v, ws, 0f) } },
+            overlay = { v -> with(tools) { draw(v, ws, phase) } },
         )
-        val edit = tools.editing
-        if (edit != null && ws != null) CanvasTextEditor(edit, view.toScreen(edit.x, edit.y), onDone = { text -> tools.commitText(ws, edit, text) }, onCancel = { tools.editing = null })
+        if (tools.text != null && isTouchPlatform && ws != null) ImeBridge(imeFocus, { a -> tools.onIme(a, ws) })
     }
 }

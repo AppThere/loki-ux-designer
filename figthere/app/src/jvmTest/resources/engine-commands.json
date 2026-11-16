@@ -372,7 +372,7 @@
 {"id":"text.edit.selectWord","label":"Select word","menu":null,"params":"{index}","shortcut":null,"undoable":false},
 {"id":"text.edit.selectLine","label":"Select line","menu":null,"params":"{index}","shortcut":null,"undoable":false},
 {"id":"text.edit.preedit","label":"Compose text (IME)","menu":null,"params":"{text (empty = cancel), cursor? (chars into text)}; shown at the caret, committed by text.edit.insert","shortcut":null,"undoable":false},
-{"id":"text.edit.selection","label":"Text selection","menu":null,"params":"{}","shortcut":null,"undoable":false},
+{"id":"text.edit.selection","label":"Text selection","menu":null,"params":"{} → {id, caret, anchor, text, preedit, caretLine: [[x, top], [x, bottom]] | null, rects: [[[x, y] × 4]]} caretLine and rects say where the caret and the highlight of the selected characters are, in page points (turned with the layer; one quadrilateral per selected line)","shortcut":null,"undoable":false},
 {"id":"text.edit.end","label":"Stop editing text","menu":null,"params":"{}","shortcut":null,"undoable":false},
 {"id":"text.openLink","label":"Open link","menu":null,"params":"{}  while editing: the link at the caret (the selection's start) goes to the UI to open, as Alt+Enter does (\"press Option Return / Alt Enter to activate a focused link\"); only a web or mail link opens → {url} ({url: null}: no link there)","shortcut":"Alt+Enter","undoable":false},
 {"id":"text.fonts","label":"List fonts","menu":null,"params":"{family? (list its styles), style?, features? (the face's OpenType features), axes? (the face's variation axes and named instances)}","shortcut":null,"undoable":false},
